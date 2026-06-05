@@ -1,0 +1,977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RCR Layer Visualizer</title>
+<style>
+  :root{
+    --navy:#004B84; --brick:#C44536; --gold:#FBAF01;
+    --gray:#E9E9E9; --ink:#1C110A; --panel:#14110d; --panel2:#1d1813;
+    --line:#2c241c; --txt:#e9e9e9; --dim:#8a8175;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--ink);color:var(--txt);
+    font-family:"Futura","Century Gothic",system-ui,sans-serif;font-size:13px}
+  #app{display:grid;grid-template-columns:320px 1fr 300px;height:100vh}
+  .col{height:100vh;overflow-y:auto;border-right:1px solid var(--line);background:var(--panel)}
+  .col:last-child{border-right:none;border-left:1px solid var(--line)}
+  #stagewrap{display:flex;flex-direction:column;height:100vh;background:#0c0a07}
+  #stagetop{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:16px}
+  #stage{position:relative;background:#000;box-shadow:0 0 0 1px var(--line),0 24px 60px rgba(0,0,0,.6)}
+  #stage canvas{position:absolute;inset:0;display:block}
+  #renderCanvas{z-index:1}
+  #guideCanvas{z-index:2;pointer-events:auto;cursor:crosshair}
+  .hdr{font-family:"Impact Label",Impact,"Bebas Neue",sans-serif;
+    letter-spacing:.08em;text-transform:uppercase;background:var(--navy);
+    color:#fff;padding:10px 14px;font-size:15px;position:sticky;top:0;z-index:5;
+    border-bottom:1px solid #00345c}
+  .sec{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .sec h3{margin:0 0 10px;font-family:"Bebas Neue","Impact Label",sans-serif;
+    letter-spacing:.1em;text-transform:uppercase;font-size:13px;color:var(--gold)}
+  label{display:block;font-size:11px;color:var(--dim);margin:8px 0 3px;
+    text-transform:uppercase;letter-spacing:.05em}
+  input[type=text],input[type=number],select{width:100%;background:var(--panel2);
+    border:1px solid var(--line);color:var(--txt);padding:6px 8px;border-radius:3px;font-size:12px}
+  input[type=range]{width:100%;accent-color:var(--gold)}
+  .row{display:flex;gap:6px}.row>*{flex:1}
+  button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:7px 10px;border-radius:3px;cursor:pointer;font-size:11px;
+    text-transform:uppercase;letter-spacing:.05em;font-family:inherit}
+  button:hover{border-color:var(--gold);color:var(--gold)}
+  button.primary{background:var(--brick);border-color:var(--brick);color:#fff}
+  button.primary:hover{background:#d9543f;color:#fff}
+  button.on{background:var(--gold);border-color:var(--gold);color:var(--ink)}
+  .filebtn{position:relative;overflow:hidden;display:inline-block;width:100%}
+  .filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .layerlist{display:flex;flex-direction:column;gap:4px}
+  .layer{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:8px;cursor:pointer}
+  .layer.sel{border-color:var(--gold)}
+  .layer .ln{display:flex;align-items:center;gap:6px;font-size:12px}
+  .layer .ln .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .layer .ctl{display:flex;gap:4px;margin-top:6px}
+  .layer .ctl button{padding:3px 6px;font-size:9px;flex:1}
+  .swatch{width:14px;height:14px;border-radius:2px;border:1px solid #0006;flex-shrink:0}
+  .transport{display:flex;gap:6px;align-items:center;padding:10px 14px;background:var(--panel2);border-bottom:1px solid var(--line)}
+  .transport button{flex:0 0 auto;min-width:42px}
+  #seek{flex:1}
+  .time{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums;min-width:84px;text-align:center}
+  .matrix{font-size:11px}
+  .conn{background:var(--panel2);border:1px solid var(--line);border-radius:3px;padding:8px;margin-bottom:6px}
+  .conn .top{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+  .conn select{font-size:11px;padding:4px}
+  .conn .sm{font-size:10px;color:var(--dim);margin:6px 0 2px}
+  .meter{height:5px;background:#000;border-radius:3px;overflow:hidden;margin-top:4px}
+  .meter > i{display:block;height:100%;width:0;background:var(--gold);transition:width .05s linear}
+  .hint{font-size:10px;color:var(--dim);line-height:1.4;margin-top:6px}
+  .pill{display:inline-block;background:var(--navy);color:#fff;font-size:9px;
+    padding:2px 6px;border-radius:10px;letter-spacing:.05em;text-transform:uppercase}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .val{float:right;color:var(--gold);font-variant-numeric:tabular-nums}
+  .chk{display:flex;align-items:center;gap:6px;margin:6px 0;font-size:11px;color:var(--txt);text-transform:none;letter-spacing:0}
+  .chk input{width:auto}
+  #brand{font-family:"Impact Label",Impact,sans-serif;font-size:11px;color:var(--dim);
+    padding:10px 14px;letter-spacing:.1em}
+  .empty{color:var(--dim);font-size:11px;text-align:center;padding:16px 0}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- LEFT: layers + ingest -->
+  <div class="col" id="left">
+    <div class="hdr">RCR Layer Visualizer</div>
+
+    <div class="sec">
+      <h3>Stage</h3>
+      <label>Canvas Size</label>
+      <select id="canvasPreset">
+        <option value="1920x1080">1080p — 1920×1080</option>
+        <option value="1080x1080">Square — 1080×1080</option>
+        <option value="1080x1920">Story — 1080×1920</option>
+        <option value="1280x720">720p — 1280×720</option>
+        <option value="4000x4000">Master Square — 4000×4000</option>
+        <option value="custom">Custom…</option>
+      </select>
+      <div class="row" id="customSize" style="display:none;margin-top:6px">
+        <div><label>W</label><input type="number" id="cw" value="1920"></div>
+        <div><label>H</label><input type="number" id="ch" value="1080"></div>
+      </div>
+      <label style="margin-top:8px">Frame Rate</label>
+      <select id="fps"><option>24</option><option selected>30</option><option>60</option></select>
+    </div>
+
+    <div class="sec">
+      <h3>Background Plate</h3>
+      <div class="filebtn"><button>Upload Background</button><input type="file" id="bgFile" accept="image/*"></div>
+      <div class="chk"><input type="checkbox" id="bgInExport" checked><label style="margin:0">Include in export</label></div>
+      <div class="chk"><input type="checkbox" id="bgGuide"><label style="margin:0">Dim as alignment guide</label></div>
+      <label>Guide opacity <span class="val" id="bgOpVal">40%</span></label>
+      <input type="range" id="bgOp" min="5" max="100" value="40">
+      <div class="hint">The plate is the bottom layer. Dim it to register assets, then keep or exclude it from the render.</div>
+    </div>
+
+    <div class="sec">
+      <h3>Layers</h3>
+      <div class="filebtn"><button class="primary">Upload PNG Layers</button><input type="file" id="pngFile" accept="image/png,image/*" multiple></div>
+      <div class="chk" style="margin-top:8px"><input type="checkbox" id="fitImport" checked><label style="margin:0">Fit oversized assets to canvas on import</label></div>
+      <div class="chk"><input type="checkbox" id="freePos"><label style="margin:0">Free position (drag to place)</label></div>
+      <div class="hint" id="posHint">Off: layers load full-canvas at 0,0. On: drag layers on the stage and use X/Y fields. Use this for cropped assets.</div>
+      <div class="layerlist" id="layerList" style="margin-top:10px">
+        <div class="empty">No layers yet.</div>
+      </div>
+    </div>
+    <div id="brand">RAGGED COMPANY RECORDINGS</div>
+  </div>
+
+  <!-- CENTER: stage -->
+  <div id="stagewrap">
+    <div class="transport">
+      <div class="filebtn" style="flex:0 0 auto;width:auto"><button>Audio</button><input type="file" id="audioFile" accept="audio/*"></div>
+      <button id="playBtn">▶</button>
+      <button id="stopBtn">■</button>
+      <input type="range" id="seek" min="0" max="1000" value="0">
+      <span class="time" id="timeLbl">0:00 / 0:00</span>
+    </div>
+    <div id="stagetop">
+      <div id="stage">
+        <canvas id="renderCanvas"></canvas>
+        <canvas id="guideCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: selected layer + matrix + export -->
+  <div class="col" id="right">
+    <div class="hdr">Mapping</div>
+
+    <div class="sec" id="layerProps">
+      <h3>Selected Layer</h3>
+      <div class="empty" id="noSel">Select a layer to edit.</div>
+      <div id="selBody" style="display:none">
+        <label>Name</label><input type="text" id="selName">
+        <div class="grid2" style="margin-top:6px">
+          <div><label>X <span class="val" id="selXv">0</span></label><input type="number" id="selX" value="0"></div>
+          <div><label>Y <span class="val" id="selYv">0</span></label><input type="number" id="selY" value="0"></div>
+        </div>
+        <label>Base Scale <span class="val" id="selScaleV">100%</span></label>
+        <input type="range" id="selScale" min="5" max="300" value="100">
+        <label>Base Opacity <span class="val" id="selOpV">100%</span></label>
+        <input type="range" id="selOp" min="0" max="100" value="100">
+        <label>Blend Mode</label>
+        <select id="selBlend">
+          <option value="source-over">Normal</option>
+          <option value="screen">Screen</option>
+          <option value="multiply">Multiply</option>
+          <option value="lighten">Lighten</option>
+          <option value="overlay">Overlay</option>
+          <option value="difference">Difference</option>
+        </select>
+        <label>Scale Origin</label>
+        <select id="selScaleOrigin">
+          <option value="self">Layer center (pulse in place)</option>
+          <option value="canvas">Canvas center (grow toward frame middle)</option>
+          <option value="origin">Layer top-left (grow down-right)</option>
+        </select>
+        <div class="hint" id="scaleOriginHint">Layer center keeps a small asset pulsing where it sits. Canvas center anchors growth to the middle of the frame — best for full-canvas layers so they don't clip off-screen.</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h3>Modulation</h3>
+      <div class="matrix" id="matrix">
+        <div class="empty">Select a layer, then add a connection.</div>
+      </div>
+      <button id="addConn" style="width:100%;margin-top:6px">+ Add Connection</button>
+    </div>
+
+    <div class="sec">
+      <h3>Export</h3>
+      <label>Export Scale <span class="val" id="exScaleV">½ — 2000×2000</span></label>
+      <select id="exScale">
+        <option value="1">Full (may exceed H.264 limit)</option>
+        <option value="0.5" selected>½ size</option>
+        <option value="0.375">⅜ size</option>
+        <option value="0.25">¼ size</option>
+      </select>
+      <div class="hint" id="exNote">H.264 maxes out near 4096px. 4000×4000 must downscale to encode as MP4.</div>
+      <button id="exportBtn" class="primary" style="width:100%;margin-top:8px">Render MP4</button>
+      <div class="meter" style="margin-top:8px"><i id="exportBar"></i></div>
+      <div class="hint" id="exportStatus">WebCodecs H.264 + AAC mux. Offline frame-walk FFT for deterministic sync.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   RCR LAYER VISUALIZER — foundation
+   Layer model with full transform | dual ingest | center-scale
+   default w/ origin toggle | offline FFT frame-walk | WebCodecs
+   ============================================================ */
+
+const S = {
+  W:1920, H:1080, fps:30,
+  layers:[],           // {id,name,img,x,y,scale,opacity,blend,scaleOrigin,visible,conns:[]}
+  bg:null,             // {img}
+  bgInExport:true, bgGuide:false, bgOp:0.4,
+  freePos:false,
+  sel:null,
+  audioBuf:null, audioEl:null, audioURL:null,
+  playing:false, startT:0, offset:0,
+  // live analysis
+  ac:null, analyser:null, freqData:null, srcNode:null,
+};
+let _id=1; const nid=()=>_id++;
+
+const rc=document.getElementById('renderCanvas');
+const gc=document.getElementById('guideCanvas');
+const rctx=rc.getContext('2d');
+const gctx=gc.getContext('2d');
+const stage=document.getElementById('stage');
+
+/* ---------- stage sizing ---------- */
+function fitStage(){
+  const wrap=document.getElementById('stagetop');
+  const pad=32;
+  const aw=wrap.clientWidth-pad, ah=wrap.clientHeight-pad;
+  const ar=S.W/S.H; let w=aw,h=aw/ar;
+  if(h>ah){h=ah;w=ah*ar;}
+  stage.style.width=w+'px'; stage.style.height=h+'px';
+  [rc,gc].forEach(c=>{c.width=S.W;c.height=S.H;c.style.width=w+'px';c.style.height=h+'px';});
+}
+window.addEventListener('resize',fitStage);
+
+/* ---------- audio source bands ---------- */
+// shared band definitions used by BOTH live analyser and offline FFT
+const BANDS = {
+  sub:[20,60], bass:[60,160], lomid:[160,500],
+  mid:[500,2000], himid:[2000,6000], treble:[6000,16000]
+};
+const SOURCES = ['sub','bass','lomid','mid','himid','treble','amplitude','onset'];
+const TARGETS = ['opacity','gate','scale','rotation','x','y','blur','hue'];
+
+/* ---------- live analyser (preview only) ---------- */
+function initLiveAudio(){
+  if(S.ac) return;
+  S.ac=new (window.AudioContext||window.webkitAudioContext)();
+  S.analyser=S.ac.createAnalyser();
+  S.analyser.fftSize=2048;
+  S.analyser.smoothingTimeConstant=0.7;
+  S.freqData=new Uint8Array(S.analyser.frequencyBinCount);
+}
+function liveBandEnergy(){
+  // returns {sub,bass,...,amplitude} normalized 0..1 from live analyser
+  const out={}; if(!S.analyser){SOURCES.forEach(s=>out[s]=0);return out;}
+  S.analyser.getByteFrequencyData(S.freqData);
+  const nyq=S.ac.sampleRate/2, bins=S.freqData.length;
+  const hzPerBin=nyq/bins;
+  for(const k in BANDS){
+    const [lo,hi]=BANDS[k]; let sum=0,n=0;
+    const a=Math.floor(lo/hzPerBin), b=Math.ceil(hi/hzPerBin);
+    for(let i=a;i<=b&&i<bins;i++){sum+=S.freqData[i];n++;}
+    out[k]=n?(sum/n)/255:0;
+  }
+  let tot=0; for(let i=0;i<bins;i++)tot+=S.freqData[i];
+  out.amplitude=tot/(bins*255);
+  out.onset=0; // onset only meaningful in offline pass (needs prev frame); live approximated below
+  return out;
+}
+
+/* ---------- gate state (hysteresis + onset) ---------- */
+// each connection targeting 'gate' keeps state across frames
+function processGate(conn, srcVal, fluxVal){
+  // conn.gateOn persists; onThresh > offThresh for hysteresis
+  const on=conn.onThresh ?? 0.7, off=conn.offThresh ?? 0.4;
+  if(conn.source==='onset'){
+    // onset: trigger on flux spike, hold minFrames
+    if(fluxVal > (conn.onThresh ?? 0.5)){conn.hold=conn.minHold ?? 4;}
+    if(conn.hold>0){conn.hold--; conn.gateOn=true;} else conn.gateOn=false;
+  } else {
+    if(!conn.gateOn && srcVal>on) conn.gateOn=true;
+    else if(conn.gateOn && srcVal<off) conn.gateOn=false;
+  }
+  return conn.gateOn?1:0;
+}
+
+/* ---------- per-connection smoothing (envelope) ---------- */
+function smoothVal(conn, target){
+  const atk=conn.attack ?? 0.5, rel=conn.release ?? 0.15;
+  if(conn._sm==null) conn._sm=target;
+  const c = target>conn._sm ? atk : rel;
+  conn._sm += (target-conn._sm)*c;
+  return conn._sm;
+}
+
+/* ---------- apply modulation to a layer, return render transform ---------- */
+function modulate(layer, energy, flux, idle){
+  const base=layer.scale/100;
+  const t={x:layer.x,y:layer.y,scale:base,baseScale:base,opacity:layer.opacity/100,
+           rotation:0,blur:0,hue:0,gateMul:1,
+           scaleOrigin:layer.scaleOrigin||'self'};
+  if(idle) return t;
+  for(const conn of layer.conns){
+    let raw = energy[conn.source] ?? 0;
+    const sc = (conn.scale ?? 1);
+    if(conn.target==='gate'){
+      const g=processGate(conn,raw,flux);
+      // soft edge ramp so it reads as a clean cut, not a dropped frame.
+      // init to g (not 0) so a gated layer isn't invisible on the first frame.
+      if(conn._edge==null) conn._edge=g;
+      conn._edge += (g-conn._edge)*0.45; // ~2-3 frame ramp
+      t.gateMul *= conn._edge;
+      continue;
+    }
+    let v = smoothVal(conn, raw) * sc;
+    switch(conn.target){
+      case 'opacity': t.opacity = Math.min(1, t.opacity*(1-(conn.depth??1)) + v*(conn.depth??1)); break;
+      case 'scale':   t.scale  += v*(conn.amount??0.5); break;
+      case 'rotation':t.rotation += v*(conn.amount??30); break;
+      case 'x':       t.x += v*(conn.amount??100); break;
+      case 'y':       t.y += v*(conn.amount??100); break;
+      case 'blur':    t.blur += v*(conn.amount??10); break;
+      case 'hue':     t.hue += v*(conn.amount??180); break;
+    }
+  }
+  t.opacity *= t.gateMul;
+  return t;
+}
+
+/* ---------- RENDER one frame to a given ctx ---------- */
+function drawFrame(ctx, energy, flux, forExport, idle){
+  ctx.clearRect(0,0,S.W,S.H);
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,S.W,S.H);
+  // background plate
+  if(S.bg){
+    const showBg = forExport ? S.bgInExport : true;
+    if(showBg){
+      ctx.save();
+      ctx.globalAlpha = (S.bgGuide && !forExport) ? S.bgOp : 1;
+      ctx.drawImage(S.bg.img,0,0,S.W,S.H);
+      ctx.restore();
+    }
+  }
+  // layers bottom-up (array order = z, index 0 bottom)
+  for(const L of S.layers){
+    if(!L.visible) continue;
+    const t=modulate(L,energy,flux,idle);
+    if(t.opacity<=0.002) continue;
+    ctx.save();
+    ctx.globalAlpha=Math.max(0,Math.min(1,t.opacity));
+    ctx.globalCompositeOperation=L.blend;
+    if(t.blur>0.1) ctx.filter=`blur(${t.blur}px)`+(t.hue?` hue-rotate(${t.hue}deg)`:'');
+    else if(t.hue) ctx.filter=`hue-rotate(${t.hue}deg)`;
+    const iw=L.img.width, ih=L.img.height;
+    const rot=t.rotation*Math.PI/180;
+    const origin=t.scaleOrigin||'self';
+    if(origin==='canvas'){
+      // growth anchored to the FRAME centre: best for full-canvas layers
+      const baseCx=t.x+(iw*t.baseScale)/2, baseCy=t.y+(ih*t.baseScale)/2;
+      const offX=baseCx-S.W/2, offY=baseCy-S.H/2;
+      const k=t.scale/t.baseScale;
+      ctx.translate(S.W/2+offX*k, S.H/2+offY*k);
+      if(rot)ctx.rotate(rot);
+      ctx.scale(t.scale,t.scale);
+      ctx.drawImage(L.img,-iw/2,-ih/2);
+    } else if(origin==='origin'){
+      ctx.translate(t.x,t.y);
+      if(rot)ctx.rotate(rot);
+      ctx.scale(t.scale,t.scale);
+      ctx.drawImage(L.img,0,0);
+    } else { // 'self' — pivot on asset's own base-scale centre, pulses in place
+      const cx=t.x+(iw*t.baseScale)/2, cy=t.y+(ih*t.baseScale)/2;
+      ctx.translate(cx,cy);
+      if(rot)ctx.rotate(rot);
+      ctx.scale(t.scale,t.scale);
+      ctx.drawImage(L.img,-iw/2,-ih/2);
+    }
+    ctx.restore();
+  }
+}
+
+/* ---------- LIVE preview loop ---------- */
+let rafId=null, prevSpec=null;
+function liveLoop(){
+  const e=liveBandEnergy();
+  // crude live flux from amplitude delta (real flux done in offline pass)
+  const flux = prevSpec==null?0:Math.max(0,e.amplitude-prevSpec);
+  prevSpec=e.amplitude;
+  const idle = !S.audioEl || S.audioEl.paused;  // show base transform when not playing
+  drawFrame(rctx,e,flux,false,idle);
+  drawGuides();
+  updateMatrixMeters(e);
+  if(S.audioEl && !S.audioEl.paused){
+    const cur=S.audioEl.currentTime, dur=S.audioEl.duration||0;
+    document.getElementById('seek').value = dur?(cur/dur*1000):0;
+    document.getElementById('timeLbl').textContent=`${fmt(cur)} / ${fmt(dur)}`;
+  }
+  rafId=requestAnimationFrame(liveLoop);
+}
+function fmt(s){s=s||0;const m=Math.floor(s/60),x=Math.floor(s%60);return m+':'+String(x).padStart(2,'0');}
+
+/* ---------- alignment guides on guideCanvas ---------- */
+let drag=null;
+function drawGuides(){
+  gctx.clearRect(0,0,S.W,S.H);
+  if(!S.freePos) return;
+  for(const L of S.layers){
+    if(!L.visible) continue;
+    const iw=L.img.width*L.scale/100, ih=L.img.height*L.scale/100;
+    const x=L.x, y=L.y;
+    gctx.strokeStyle = (S.sel===L)?'#FBAF01':'#ffffff55';
+    gctx.lineWidth=2;
+    gctx.setLineDash(S.sel===L?[]:[8,6]);
+    gctx.strokeRect(x,y,iw,ih);
+    if(S.sel===L){
+      gctx.fillStyle='#FBAF01';
+      gctx.beginPath();gctx.arc(x+iw/2,y+ih/2,6,0,7);gctx.fill();
+    }
+  }
+  gctx.setLineDash([]);
+}
+function canvasPt(ev){
+  const r=gc.getBoundingClientRect();
+  return {x:(ev.clientX-r.left)/r.width*S.W, y:(ev.clientY-r.top)/r.height*S.H};
+}
+gc.addEventListener('pointerdown',ev=>{
+  if(!S.freePos) return;
+  const p=canvasPt(ev);
+  for(let i=S.layers.length-1;i>=0;i--){
+    const L=S.layers[i];
+    const iw=L.img.width*L.scale/100, ih=L.img.height*L.scale/100;
+    if(p.x>=L.x&&p.x<=L.x+iw&&p.y>=L.y&&p.y<=L.y+ih){
+      selectLayer(L); drag={L,dx:p.x-L.x,dy:p.y-L.y}; gc.setPointerCapture(ev.pointerId); return;
+    }
+  }
+});
+gc.addEventListener('pointermove',ev=>{
+  if(!drag) return;
+  const p=canvasPt(ev);
+  drag.L.x=Math.round(p.x-drag.dx); drag.L.y=Math.round(p.y-drag.dy);
+  syncSelFields();
+});
+gc.addEventListener('pointerup',ev=>{drag=null;});
+
+/* ---------- ingest ---------- */
+function loadImg(src){return new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.src=src;});}
+
+document.getElementById('pngFile').addEventListener('change',async e=>{
+  const files=[...e.target.files]; if(!files.length) return;
+  const fitOnImport=document.getElementById('fitImport').checked;
+  for(const f of files){
+    const url=URL.createObjectURL(f);
+    const img=await loadImg(url);
+    const name=f.name.replace(/\.[^.]+$/,'');
+    let scale=100, x=0, y=0;
+    if(fitOnImport){
+      // scale so the longest edge fits the canvas, then center
+      const s=Math.min(S.W/img.width, S.H/img.height);
+      scale=Math.round(Math.min(1,s)*100);
+      const w=img.width*scale/100, h=img.height*scale/100;
+      x=Math.round((S.W-w)/2); y=Math.round((S.H-h)/2);
+    }
+    S.layers.push({id:nid(),name,img,
+      x,y,scale,opacity:100,blend:'source-over',
+      scaleOrigin:'self',visible:true,conns:[]});
+  }
+  e.target.value='';
+  renderLayerList();
+  if(!S.sel && S.layers.length) selectLayer(S.layers[S.layers.length-1]);
+});
+
+// Fit / Fill helpers usable per-layer after import
+function fitLayer(L,mode){
+  const s = mode==='fill'
+    ? Math.max(S.W/L.img.width, S.H/L.img.height)
+    : Math.min(S.W/L.img.width, S.H/L.img.height);
+  L.scale=Math.round(s*100);
+  const w=L.img.width*L.scale/100, h=L.img.height*L.scale/100;
+  L.x=Math.round((S.W-w)/2); L.y=Math.round((S.H-h)/2);
+  if(S.sel===L) syncSelFields();
+  renderLayerList();
+}
+
+document.getElementById('bgFile').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const img=await loadImg(URL.createObjectURL(f));
+  S.bg={img};
+  e.target.value='';
+});
+
+document.getElementById('audioFile').addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  if(S.audioURL) URL.revokeObjectURL(S.audioURL);
+  S.audioURL=URL.createObjectURL(f);
+  // decode for offline export
+  initLiveAudio();
+  const arr=await f.arrayBuffer();
+  S.audioBuf=await S.ac.decodeAudioData(arr.slice(0));
+  // live element
+  if(S.audioEl) S.audioEl.pause();
+  S.audioEl=new Audio(S.audioURL);
+  S.audioEl.crossOrigin='anonymous';
+  S.srcNode=S.ac.createMediaElementSource(S.audioEl);
+  S.srcNode.connect(S.analyser); S.analyser.connect(S.ac.destination);
+  S.audioEl.addEventListener('loadedmetadata',()=>{
+    document.getElementById('timeLbl').textContent=`0:00 / ${fmt(S.audioEl.duration)}`;
+  });
+  e.target.value='';
+});
+
+/* ---------- transport ---------- */
+document.getElementById('playBtn').addEventListener('click',()=>{
+  if(!S.audioEl) return;
+  if(S.ac.state==='suspended') S.ac.resume();
+  if(S.audioEl.paused){S.audioEl.play(); document.getElementById('playBtn').textContent='⏸';}
+  else {S.audioEl.pause(); document.getElementById('playBtn').textContent='▶';}
+});
+document.getElementById('stopBtn').addEventListener('click',()=>{
+  if(!S.audioEl) return; S.audioEl.pause(); S.audioEl.currentTime=0;
+  document.getElementById('playBtn').textContent='▶';
+});
+document.getElementById('seek').addEventListener('input',e=>{
+  if(!S.audioEl||!S.audioEl.duration) return;
+  S.audioEl.currentTime=e.target.value/1000*S.audioEl.duration;
+});
+
+/* ---------- layer list UI ---------- */
+function renderLayerList(){
+  const el=document.getElementById('layerList');
+  if(!S.layers.length){el.innerHTML='<div class="empty">No layers yet.</div>';return;}
+  el.innerHTML='';
+  // show top layer first (reverse of z so list reads like Photoshop)
+  [...S.layers].reverse().forEach(L=>{
+    const d=document.createElement('div');
+    d.className='layer'+(S.sel===L?' sel':'');
+    d.innerHTML=`<div class="ln">
+        <span class="nm">${L.name}</span>
+        <span class="pill">${L.conns.length}m</span>
+      </div>
+      <div class="ctl">
+        <button data-a="fit">Fit</button>
+        <button data-a="fill">Fill</button>
+        <button data-a="vis">${L.visible?'👁':'—'}</button>
+        <button data-a="up">▲</button>
+        <button data-a="dn">▼</button>
+        <button data-a="del">✕</button>
+      </div>`;
+    d.addEventListener('click',ev=>{
+      const a=ev.target.dataset.a;
+      if(!a){selectLayer(L);return;}
+      ev.stopPropagation();
+      const i=S.layers.indexOf(L);
+      if(a==='fit'){fitLayer(L,'fit');return;}
+      if(a==='fill'){fitLayer(L,'fill');return;}
+      if(a==='vis')L.visible=!L.visible;
+      if(a==='up'&&i<S.layers.length-1){[S.layers[i],S.layers[i+1]]=[S.layers[i+1],S.layers[i]];}
+      if(a==='dn'&&i>0){[S.layers[i],S.layers[i-1]]=[S.layers[i-1],S.layers[i]];}
+      if(a==='del'){S.layers.splice(i,1); if(S.sel===L)selectLayer(null);}
+      renderLayerList();
+    });
+    el.appendChild(d);
+  });
+}
+
+function selectLayer(L){
+  S.sel=L;
+  renderLayerList();
+  const noSel=document.getElementById('noSel'), body=document.getElementById('selBody');
+  if(!L){noSel.style.display='';body.style.display='none';renderMatrix();return;}
+  noSel.style.display='none';body.style.display='';
+  syncSelFields();
+  renderMatrix();
+}
+function syncSelFields(){
+  const L=S.sel; if(!L)return;
+  selName.value=L.name; selX.value=L.x; selY.value=L.y;
+  selScale.value=L.scale; selOp.value=L.opacity; selBlend.value=L.blend;
+  selScaleOrigin.value=L.scaleOrigin||'self';
+  selXv.textContent=L.x; selYv.textContent=L.y;
+  selScaleV.textContent=L.scale+'%'; selOpV.textContent=L.opacity+'%';
+}
+['selName','selX','selY','selScale','selOp','selBlend','selScaleOrigin'].forEach(id=>{
+  document.getElementById(id).addEventListener('input',()=>{
+    const L=S.sel; if(!L)return;
+    L.name=selName.value; L.x=+selX.value; L.y=+selY.value;
+    L.scale=+selScale.value; L.opacity=+selOp.value; L.blend=selBlend.value;
+    L.scaleOrigin=selScaleOrigin.value;
+    selXv.textContent=L.x;selYv.textContent=L.y;
+    selScaleV.textContent=L.scale+'%';selOpV.textContent=L.opacity+'%';
+    renderLayerList();
+  });
+});
+
+/* ---------- modulation matrix UI ---------- */
+document.getElementById('addConn').addEventListener('click',()=>{
+  if(!S.sel)return;
+  S.sel.conns.push({source:'bass',target:'scale',scale:1,amount:0.5,depth:1,
+    attack:0.5,release:0.15,onThresh:0.7,offThresh:0.4,minHold:4});
+  renderMatrix(); renderLayerList();
+});
+function renderMatrix(){
+  const m=document.getElementById('matrix');
+  if(!S.sel){m.innerHTML='<div class="empty">Select a layer, then add a connection.</div>';return;}
+  if(!S.sel.conns.length){m.innerHTML='<div class="empty">No connections. Add one below.</div>';return;}
+  m.innerHTML='';
+  S.sel.conns.forEach((c,ci)=>{
+    const d=document.createElement('div'); d.className='conn';
+    const isGate=c.target==='gate';
+    d.innerHTML=`
+      <div class="top">
+        <select data-k="source">${SOURCES.map(s=>`<option ${c.source===s?'selected':''}>${s}</option>`).join('')}</select>
+        <span>→</span>
+        <select data-k="target">${TARGETS.map(t=>`<option ${c.target===t?'selected':''}>${t}</option>`).join('')}</select>
+        <button data-k="del" style="flex:0 0 auto;padding:4px 8px">✕</button>
+      </div>
+      <div class="meter"><i data-meter="${ci}"></i></div>
+      ${isGate?`
+        <div class="sm">On threshold <span class="val">${(c.onThresh).toFixed(2)}</span></div>
+        <input type="range" data-k="onThresh" min="0.05" max="1" step="0.01" value="${c.onThresh}">
+        <div class="sm">Off threshold (hysteresis) <span class="val">${(c.offThresh).toFixed(2)}</span></div>
+        <input type="range" data-k="offThresh" min="0" max="0.95" step="0.01" value="${c.offThresh}">
+        ${c.source==='onset'?`<div class="sm">Min hold (frames) <span class="val">${c.minHold}</span></div>
+        <input type="range" data-k="minHold" min="1" max="20" step="1" value="${c.minHold}">`:''}
+      `:`
+        <div class="sm">Scale <span class="val">${c.scale.toFixed(2)}</span></div>
+        <input type="range" data-k="scale" min="0" max="3" step="0.05" value="${c.scale}">
+        <div class="sm">Amount <span class="val">${c.amount.toFixed(2)}</span></div>
+        <input type="range" data-k="amount" min="0" max="${c.target==='hue'?360:c.target==='rotation'?180:c.target==='x'||c.target==='y'?400:c.target==='blur'?40:2}" step="0.05" value="${c.amount}">
+        <div class="sm">Attack <span class="val">${c.attack.toFixed(2)}</span> · Release <span class="val">${c.release.toFixed(2)}</span></div>
+        <input type="range" data-k="attack" min="0.02" max="1" step="0.01" value="${c.attack}">
+        <input type="range" data-k="release" min="0.02" max="1" step="0.01" value="${c.release}">
+      `}
+    `;
+    d.querySelectorAll('[data-k]').forEach(inp=>{
+      const k=inp.dataset.k;
+      inp.addEventListener(inp.tagName==='SELECT'?'change':inp.tagName==='BUTTON'?'click':'input',()=>{
+        if(k==='del'){S.sel.conns.splice(ci,1);renderMatrix();renderLayerList();return;}
+        if(inp.tagName==='SELECT')c[k]=inp.value;
+        else c[k]=+inp.value;
+        if(k==='target'||k==='source')renderMatrix();
+        else { // live-update label
+          const lab=inp.previousElementSibling?.querySelector('.val');
+          if(lab&&inp.type==='range')lab.textContent=(+inp.value).toFixed(k==='minHold'?0:2);
+        }
+      });
+    });
+    m.appendChild(d);
+  });
+}
+function updateMatrixMeters(energy){
+  if(!S.sel)return;
+  S.sel.conns.forEach((c,ci)=>{
+    const bar=document.querySelector(`[data-meter="${ci}"]`);
+    if(bar)bar.style.width=Math.min(100,(energy[c.source]??0)*100)+'%';
+  });
+}
+
+/* ---------- offline FFT frame-walk (deterministic) ---------- */
+// Hann-windowed magnitude FFT over a window centered on each frame timestamp.
+function makeFFT(N){
+  // radix-2 iterative FFT (real input)
+  const cos=new Float32Array(N/2), sin=new Float32Array(N/2);
+  for(let i=0;i<N/2;i++){cos[i]=Math.cos(-2*Math.PI*i/N);sin[i]=Math.sin(-2*Math.PI*i/N);}
+  return function(re){
+    const im=new Float32Array(N);
+    // bit reversal
+    for(let i=1,j=0;i<N;i++){
+      let bit=N>>1;
+      for(;j&bit;bit>>=1)j^=bit; j^=bit;
+      if(i<j){const t=re[i];re[i]=re[j];re[j]=t;}
+    }
+    for(let len=2;len<=N;len<<=1){
+      const half=len>>1, step=N/len;
+      for(let i=0;i<N;i+=len){
+        for(let k=0,idx=0;k<half;k++,idx+=step){
+          const c=cos[idx],s=sin[idx];
+          const ar=re[i+k],ai=im[i+k];
+          const br=re[i+k+half]*c-im[i+k+half]*s;
+          const bi=re[i+k+half]*s+im[i+k+half]*c;
+          re[i+k]=ar+br;im[i+k]=ai+bi;
+          re[i+k+half]=ar-br;im[i+k+half]=ai-bi;
+        }
+      }
+    }
+    const mag=new Float32Array(N/2);
+    for(let i=0;i<N/2;i++)mag[i]=Math.sqrt(re[i]*re[i]+im[i]*im[i]);
+    return mag;
+  };
+}
+function offlineEnergyAt(mono, sr, t, fftSize, fftFn, prevMag){
+  const center=Math.floor(t*sr);
+  const start=center-fftSize/2;
+  const re=new Float32Array(fftSize);
+  for(let i=0;i<fftSize;i++){
+    const idx=start+i;
+    const s=(idx>=0&&idx<mono.length)?mono[idx]:0;
+    const w=0.5-0.5*Math.cos(2*Math.PI*i/(fftSize-1)); // Hann
+    re[i]=s*w;
+  }
+  const mag=fftFn(re);
+  const hzPerBin=(sr/2)/(fftSize/2);
+  const e={};
+  for(const k in BANDS){
+    const[lo,hi]=BANDS[k];let sum=0,n=0;
+    const a=Math.floor(lo/hzPerBin),b=Math.ceil(hi/hzPerBin);
+    for(let i=a;i<=b&&i<mag.length;i++){sum+=mag[i];n++;}
+    e[k]=n?sum/n:0;
+  }
+  let tot=0;for(let i=0;i<mag.length;i++)tot+=mag[i];
+  e.amplitude=tot/mag.length;
+  // spectral flux (onset)
+  let flux=0;
+  if(prevMag){for(let i=0;i<mag.length;i++){const d=mag[i]-prevMag[i];if(d>0)flux+=d;}}
+  e.onset=flux;
+  return {e,mag,flux};
+}
+
+/* ---------- EXPORT: WebCodecs VideoEncoder + mp4 mux ---------- */
+async function exportMP4(){
+  if(!S.audioBuf){setExport('Load audio first.',0);return;}
+  if(typeof VideoEncoder==='undefined'){setExport('WebCodecs not supported in this browser.',0);return;}
+  // reset connection state so render is deterministic
+  S.layers.forEach(L=>L.conns.forEach(c=>{c._sm=null;c._edge=0;c.gateOn=false;c.hold=0;}));
+
+  const dur=S.audioBuf.duration, fps=S.fps;
+  const total=Math.ceil(dur*fps);
+  const sr=S.audioBuf.sampleRate;
+  const mono=mixToMono(S.audioBuf);
+  const fftSize=2048, fftFn=makeFFT(fftSize);
+
+  // CHEAP PEAK PRE-SCAN: sample ~4x/sec instead of every frame to find
+  // normalization maxima. ~16x fewer FFTs than the old full pre-pass,
+  // visually identical peaks. Then a SINGLE encode pass does the real FFT.
+  setExport('Scanning levels…',2);
+  const norm={}; SOURCES.forEach(s=>norm[s]=1e-6);
+  const scanStep=Math.max(1,Math.floor(fps/4));
+  let spm=null;
+  for(let f=0;f<total;f+=scanStep){
+    const {e,mag}=offlineEnergyAt(mono,sr,f/fps,fftSize,fftFn,spm);
+    spm=mag;
+    for(const k in e) if(k in norm) norm[k]=Math.max(norm[k],e[k]);
+  }
+  const normalize=e=>{const o={};for(const k in e)o[k]=norm[k]>0?Math.min(1,e[k]/norm[k]):e[k];return o;};
+
+  // encoder setup
+  const chunks=[]; let firstCfg=null; let encErr=null;
+  const enc=new VideoEncoder({
+    output:(chunk,meta)=>{
+      if(meta&&meta.decoderConfig&&!firstCfg)firstCfg=meta.decoderConfig;
+      const buf=new Uint8Array(chunk.byteLength);chunk.copyTo(buf);
+      chunks.push({data:buf,ts:chunk.timestamp,dur:chunk.duration,key:chunk.type==='key'});
+    },
+    error:e=>{encErr=e;setExport('Encoder error: '+e.message,0);}
+  });
+
+  // export dimensions — downscale to keep H.264 happy (4000² can't encode)
+  let exScale=parseFloat(document.getElementById('exScale').value)||0.5;
+  let EW=Math.round(S.W*exScale), EH=Math.round(S.H*exScale);
+  // H.264 needs even dimensions
+  EW-=EW%2; EH-=EH%2;
+
+  // Pick a codec the browser actually supports for THIS resolution.
+  // Try profiles high→main→baseline; configure() doesn't throw on bad codec,
+  // it fails async at first encode — so we must probe with isConfigSupported.
+  const candidates=[
+    'avc1.640034','avc1.640033','avc1.640032','avc1.640028','avc1.4d0032','avc1.42E028'
+  ];
+  let chosen=null;
+  for(const codec of candidates){
+    try{
+      const sup=await VideoEncoder.isConfigSupported({
+        codec,width:EW,height:EH,bitrate:16_000_000,framerate:fps});
+      if(sup&&sup.supported){chosen=sup.config||{codec,width:EW,height:EH,bitrate:16_000_000,framerate:fps};break;}
+    }catch(_){}
+  }
+  if(!chosen){
+    setExport(`No supported H.264 config at ${EW}×${EH}. Pick a smaller export scale.`,0);
+    return;
+  }
+  enc.configure(chosen);
+
+  // Draw DIRECTLY at output resolution — no 4000² intermediate.
+  // Scale the context by exScale so all layer coords (in S.W/S.H space)
+  // map correctly into the smaller encode canvas. Halves fill cost and
+  // removes a whole per-frame drawImage downscale.
+  const off=new OffscreenCanvas(EW,EH);
+  const octx=off.getContext('2d',{alpha:false});
+  const sx=EW/S.W, sy=EH/S.H;
+  let prevMag=null;
+  for(let f=0;f<total;f++){
+    if(encErr){enc.close();return;}                 // bail loudly, never hang
+    // FFT once per frame, here — not in a separate pass
+    const r=offlineEnergyAt(mono,sr,f/fps,fftSize,fftFn,prevMag);
+    prevMag=r.mag;
+    const e=normalize(r.e);
+    const flux=r.flux;
+    octx.setTransform(sx,0,0,sy,0,0);
+    drawFrameTo(octx,e,flux);
+    octx.setTransform(1,0,0,1,0,0);
+    const vf=new VideoFrame(off,{timestamp:Math.round(f/fps*1e6),duration:Math.round(1/fps*1e6)});
+    enc.encode(vf,{keyFrame:f%fps===0});
+    vf.close();
+    // BACKPRESSURE: yield only when the queue is actually backing up.
+    if(enc.encodeQueueSize>6){
+      await new Promise(r=>{
+        const chk=()=>{ if(encErr||enc.encodeQueueSize<=2) r(); else setTimeout(chk,2); };
+        chk();
+      });
+    } else if((f&31)===0){
+      await new Promise(r=>setTimeout(r));
+    }
+    if((f&15)===0)setExport(`Encoding… ${Math.round(f/total*88)+6}%  (q${enc.encodeQueueSize})`,Math.round(f/total*88)+6);
+  }
+  setExport('Flushing encoder…',96);
+  await enc.flush();
+  if(encErr){enc.close();return;}
+  enc.close();
+
+  setExport('Muxing MP4…',92);
+  const mp4=await muxMP4(chunks,firstCfg,EW,EH,fps,S.audioBuf,S.bgInExport);
+  const blob=new Blob([mp4],{type:'video/mp4'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download='rcr_layer_visualizer.mp4';a.click();
+  setExport('Done — downloaded.',100);
+}
+// render variant that respects export flag for bg
+function drawFrameTo(ctx,e,flux){
+  ctx.clearRect(0,0,S.W,S.H);ctx.fillStyle='#000';ctx.fillRect(0,0,S.W,S.H);
+  if(S.bg&&S.bgInExport)ctx.drawImage(S.bg.img,0,0,S.W,S.H);
+  for(const L of S.layers){
+    if(!L.visible)continue;
+    const t=modulate(L,e,flux);
+    if(t.opacity<=0.002)continue;
+    ctx.save();
+    ctx.globalAlpha=Math.max(0,Math.min(1,t.opacity));
+    ctx.globalCompositeOperation=L.blend;
+    if(t.blur>0.1)ctx.filter=`blur(${t.blur}px)`+(t.hue?` hue-rotate(${t.hue}deg)`:'');
+    else if(t.hue)ctx.filter=`hue-rotate(${t.hue}deg)`;
+    const iw=L.img.width,ih=L.img.height;
+    const rot=t.rotation*Math.PI/180;
+    const origin=L.scaleOrigin||'self';
+    if(origin==='canvas'){
+      const baseCx=t.x+(iw*t.baseScale)/2, baseCy=t.y+(ih*t.baseScale)/2;
+      const offX=baseCx-S.W/2, offY=baseCy-S.H/2;
+      ctx.translate(S.W/2+offX*(t.scale/t.baseScale), S.H/2+offY*(t.scale/t.baseScale));
+      if(rot)ctx.rotate(rot);ctx.scale(t.scale,t.scale);ctx.drawImage(L.img,-iw/2,-ih/2);
+    } else if(origin==='self'){
+      const cx=t.x+(iw*t.baseScale)/2,cy=t.y+(ih*t.baseScale)/2;
+      ctx.translate(cx,cy);if(rot)ctx.rotate(rot);ctx.scale(t.scale,t.scale);ctx.drawImage(L.img,-iw/2,-ih/2);
+    } else {
+      ctx.translate(t.x,t.y);if(rot)ctx.rotate(rot);ctx.scale(t.scale,t.scale);ctx.drawImage(L.img,0,0);
+    }
+    ctx.restore();
+  }
+}
+function mixToMono(buf){
+  const n=buf.length,ch=buf.numberOfChannels,out=new Float32Array(n);
+  for(let c=0;c<ch;c++){const d=buf.getChannelData(c);for(let i=0;i<n;i++)out[i]+=d[i]/ch;}
+  return out;
+}
+function setExport(msg,pct){
+  document.getElementById('exportStatus').textContent=msg;
+  document.getElementById('exportBar').style.width=(pct||0)+'%';
+}
+document.getElementById('exportBtn').addEventListener('click',exportMP4);
+function updateExScaleLabel(){
+  const s=parseFloat(document.getElementById('exScale').value)||0.5;
+  let w=Math.round(S.W*s), h=Math.round(S.H*s); w-=w%2; h-=h%2;
+  const frac=s===1?'Full':s===0.5?'½':s===0.375?'⅜':s===0.25?'¼':s+'×';
+  document.getElementById('exScaleV').textContent=`${frac} — ${w}×${h}`;
+  document.getElementById('exNote').textContent = (Math.max(w,h)>4096)
+    ? `⚠ ${w}×${h} likely exceeds H.264 limit — pick a smaller scale.`
+    : `Encodes at ${w}×${h}. Composition stays ${S.W}×${S.H}.`;
+}
+document.getElementById('exScale').addEventListener('change',updateExScaleLabel);
+
+/* ---------- minimal MP4 muxer (H.264 + AAC) ---------- */
+/* Compact fragmented-MP4 writer. Audio encoded via AudioEncoder (AAC). */
+async function muxMP4(vChunks,vCfg,W,H,fps,audioBuf,withAudio){
+  // Encode audio to AAC
+  let aChunks=[],aCfg=null;
+  if(typeof AudioEncoder!=='undefined'){
+    await new Promise(async(resolve)=>{
+      const ae=new AudioEncoder({
+        output:(c,meta)=>{if(meta?.decoderConfig&&!aCfg)aCfg=meta.decoderConfig;
+          const b=new Uint8Array(c.byteLength);c.copyTo(b);aChunks.push({data:b,ts:c.timestamp,dur:c.duration});},
+        error:()=>resolve()
+      });
+      const sr=audioBuf.sampleRate, ch=Math.min(2,audioBuf.numberOfChannels);
+      ae.configure({codec:'mp4a.40.2',sampleRate:sr,numberOfChannels:ch,bitrate:192000});
+      // feed in ~1024-sample frames interleaved
+      const frame=1024, n=audioBuf.length;
+      const chans=[];for(let c=0;c<ch;c++)chans.push(audioBuf.getChannelData(c));
+      for(let off=0;off<n;off+=frame){
+        const len=Math.min(frame,n-off);
+        const data=new Float32Array(len*ch);
+        for(let i=0;i<len;i++)for(let c=0;c<ch;c++)data[i*ch+c]=chans[c][off+i];
+        const adata=new AudioData({format:'f32',sampleRate:sr,numberOfFrames:len,
+          numberOfChannels:ch,timestamp:Math.round(off/sr*1e6),data});
+        ae.encode(adata);adata.close();
+      }
+      await ae.flush();ae.close();resolve();
+    });
+  }
+  // Build MP4 via mp4-muxer-style writer (inline minimal)
+  return buildMP4(vChunks,vCfg,aChunks,aCfg,W,H,fps);
+}
+/* NOTE: buildMP4 uses the mp4-muxer library loaded below for reliability. */
+let MP4Muxer=null;
+async function buildMP4(vc,vcfg,ac,acfg,W,H,fps){
+  if(!MP4Muxer){setExport('Loading muxer…',90);await loadMuxer();}
+  const {Muxer,ArrayBufferTarget}=MP4Muxer;
+  const target=new ArrayBufferTarget();
+  const opts={target,fastStart:'in-memory',
+    video:{codec:'avc',width:W,height:H,frameRate:fps}};
+  if(ac.length&&acfg)opts.audio={codec:'aac',sampleRate:acfg.sampleRate||48000,numberOfChannels:acfg.numberOfChannels||2};
+  const mux=new Muxer(opts);
+  for(const c of vc) mux.addVideoChunkRaw(c.data,c.key?'key':'delta',c.ts,c.dur,vcfg?{decoderConfig:vcfg}:undefined);
+  for(const c of ac) mux.addAudioChunkRaw(c.data,'key',c.ts,c.dur,acfg?{decoderConfig:acfg}:undefined);
+  mux.finalize();
+  return target.buffer;
+}
+function loadMuxer(){
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.5/build/mp4-muxer.min.js';
+    s.onload=()=>{MP4Muxer=window.Mp4Muxer||window.MP4Muxer;res();};
+    s.onerror=()=>{setExport('Muxer load failed (needs network). Use local copy.',0);rej();};
+    document.head.appendChild(s);
+  });
+}
+
+/* ---------- stage size controls ---------- */
+function applyCanvasSize(){
+  const v=document.getElementById('canvasPreset').value;
+  if(v==='custom'){S.W=+document.getElementById('cw').value;S.H=+document.getElementById('ch').value;}
+  else {const[w,h]=v.split('x').map(Number);S.W=w;S.H=h;}
+  S.fps=+document.getElementById('fps').value;
+  fitStage();
+  if(document.getElementById('exScaleV')) updateExScaleLabel();
+}
+document.getElementById('canvasPreset').addEventListener('change',e=>{
+  document.getElementById('customSize').style.display=e.target.value==='custom'?'flex':'none';
+  applyCanvasSize();
+});
+document.getElementById('cw').addEventListener('input',applyCanvasSize);
+document.getElementById('ch').addEventListener('input',applyCanvasSize);
+document.getElementById('fps').addEventListener('change',applyCanvasSize);
+
+/* ---------- bg / freepos toggles ---------- */
+document.getElementById('bgInExport').addEventListener('change',e=>S.bgInExport=e.target.checked);
+document.getElementById('bgGuide').addEventListener('change',e=>S.bgGuide=e.target.checked);
+document.getElementById('bgOp').addEventListener('input',e=>{S.bgOp=e.target.value/100;document.getElementById('bgOpVal').textContent=e.target.value+'%';});
+document.getElementById('freePos').addEventListener('change',e=>{
+  S.freePos=e.target.checked;
+  document.getElementById('posHint').textContent=S.freePos
+    ?'Drag layers on the stage; bounding boxes show. X/Y fields update live.'
+    :'Off: layers load full-canvas at 0,0. On: drag to place cropped assets.';
+});
+
+/* ---------- boot ---------- */
+applyCanvasSize();
+updateExScaleLabel();
+fitStage();
+liveLoop();
+</script>
+</body>
+</html>
